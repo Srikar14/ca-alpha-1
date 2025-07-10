@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Summarizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- PDF.js library from Mozilla -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <style>
+        /* Custom styles for better UI elements */
+        .file-input-label {
+            transition: all 0.2s ease-in-out;
+        }
+        .file-input-label:hover {
+            background-color: #e9e9f7;
+            border-color: #4f46e5;
+        }
+        #loader {
+            border-top-color: #4f46e5;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Make table headers sticky */
+        thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        /* Ensure canvas is responsive */
+        #pdf-canvas {
+            width: 100%;
+            height: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800">
+
+    <div class="container mx-auto p-4 sm:p-6 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-900">Bank Statement Summarizer</h1>
+            <p class="mt-2 text-md text-gray-600">Upload your PDF bank statements to extract key details locally.</p>
+            <p class="mt-1 text-sm text-indigo-600 font-medium">Your files are processed in your browser and are never uploaded to a server.</p>
+        </header>
+
+        <main>
+            <!-- File Upload Section -->
+            <div class="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-md">
+                <label for="pdf-files" class="file-input-label flex justify-center w-full h-32 px-4 transition bg-white border-2 border-gray-300 border-dashed rounded-md appearance-none cursor-pointer hover:border-indigo-600 focus:outline-none">
+                    <span class="flex items-center space-x-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span class="font-medium text-gray-600">
+                            Drop files to Attach, or
+                            <span class="text-indigo-600 underline">browse</span>
+                        </span>
+                    </span>
+                    <input type="file" id="pdf-files" multiple accept=".pdf" class="hidden">
+                </label>
+            </div>
+
+            <!-- Loader and Status -->
+            <div id="status-container" class="text-center my-6 h-8">
+                <div id="loader" class="w-8 h-8 border-4 border-gray-200 rounded-full inline-block hidden"></div>
+                <p id="status-text" class="text-gray-600"></p>
+            </div>
+
+            <!-- Results Table Section -->
+            <div id="results-container" class="mt-4 bg-white rounded-xl shadow-md overflow-hidden hidden">
+                 <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm divide-y divide-gray-200">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Filename</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Bank Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Account No.</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Statement Period</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Closing Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body" class="bg-white divide-y divide-gray-200">
+                            <!-- Rows will be inserted here by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="no-results" class="text-center mt-8 text-gray-500 hidden">
+                <p>No data extracted. Please check your PDFs or adjust the extraction patterns in the script if needed.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- PDF Preview Modal -->
+    <div id="pdf-modal" class="fixed inset-0 bg-black bg-opacity-75 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-4xl h-full max-h-[90vh] flex flex-col">
+            <header class="p-4 border-b flex justify-between items-center flex-shrink-0">
+                <h2 id="modal-title" class="text-lg font-semibold text-gray-800 truncate">PDF Preview</h2>
+                <button id="modal-close" class="text-gray-500 hover:text-gray-800 text-3xl leading-none">&times;</button>
+            </header>
+            <main class="flex-grow overflow-y-auto p-4">
+                <canvas id="pdf-canvas"></canvas>
+            </main>
+            <footer class="p-4 border-t flex justify-center items-center space-x-2 sm:space-x-4 flex-shrink-0 bg-gray-50 rounded-b-lg">
+                <button id="first-page" class="px-3 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">First</button>
+                <button id="prev-page" class="px-3 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
+                <span class="text-gray-700 text-sm sm:text-base">Page <span id="page-num" class="font-semibold"></span> of <span id="page-count" class="font-semibold"></span></span>
+                <button id="next-page" class="px-3 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
+                <button id="last-page" class="px-3 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Last</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Password Modal -->
+    <div id="password-modal" class="fixed inset-0 bg-black bg-opacity-75 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-sm flex flex-col">
+            <header class="p-4 border-b">
+                <h2 id="password-modal-title" class="text-lg font-semibold text-gray-800">Password Required</h2>
+            </header>
+            <main class="p-4">
+                <p id="password-prompt-text" class="mb-4 text-sm text-gray-600">Please enter the password for the file:</p>
+                <input type="password" id="password-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Enter password...">
+            </main>
+            <footer class="p-4 border-t flex justify-end items-center space-x-2 bg-gray-50 rounded-b-lg">
+                <button id="password-cancel" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-lg">Cancel</button>
+                <button id="password-submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg">Submit</button>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        // Set the worker source for PDF.js. This is required.
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+
+        const fileInput = document.getElementById('pdf-files');
+        const resultsContainer = document.getElementById('results-container');
+        const resultsBody = document.getElementById('results-body');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+        const noResults = document.getElementById('no-results');
+
+        // Preview Modal elements
+        const pdfModal = document.getElementById('pdf-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalClose = document.getElementById('modal-close');
+        const pdfCanvas = document.getElementById('pdf-canvas');
+        const firstPageBtn = document.getElementById('first-page');
+        const prevPageBtn = document.getElementById('prev-page');
+        const nextPageBtn = document.getElementById('next-page');
+        const lastPageBtn = document.getElementById('last-page');
+        const pageNumSpan = document.getElementById('page-num');
+        const pageCountSpan = document.getElementById('page-count');
+
+        // Password Modal elements
+        const passwordModal = document.getElementById('password-modal');
+        const passwordPromptText = document.getElementById('password-prompt-text');
+        const passwordInput = document.getElementById('password-input');
+        const passwordSubmitBtn = document.getElementById('password-submit');
+        const passwordCancelBtn = document.getElementById('password-cancel');
+
+        let uploadedFilesMap = new Map();
+        let currentPdfDoc = null;
+        let currentPageNum = 1;
+
+        fileInput.addEventListener('change', handleFileSelect);
+
+        /**
+         * Handles the file selection event.
+         */
+        async function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length === 0) return;
+            
+            resultsBody.innerHTML = '';
+            uploadedFilesMap.clear();
+            resultsContainer.classList.add('hidden');
+            noResults.classList.add('hidden');
+            loader.classList.remove('hidden');
+            statusText.textContent = `Processing ${files.length} file(s)...`;
+
+            for (const file of files) {
+                uploadedFilesMap.set(file.name, file);
+            }
+
+            const allPromises = Array.from(files).map(file => processFile(file));
+            const allResults = await Promise.all(allPromises);
+
+            loader.classList.add('hidden');
+            statusText.textContent = `Processed ${files.length} file(s).`;
+            let rowsAdded = 0;
+            allResults.forEach(result => {
+                if (result) {
+                    addResultToTable(result);
+                    rowsAdded++;
+                }
+            });
+            if (rowsAdded > 0) {
+                resultsContainer.classList.remove('hidden');
+            } else {
+                noResults.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Processes a single PDF file for data extraction.
+         */
+        async function processFile(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const arrayBuffer = e.target.result;
+                    try {
+                        const text = await extractTextFromPdf(arrayBuffer, file.name);
+                        const info = extractInfoFromText(text);
+                        resolve({ filename: file.name, ...info });
+                    } catch (error) {
+                        console.error(`Error processing ${file.name}:`, error);
+                        resolve({
+                            filename: file.name, bankName: 'Error', accountNumber: error.message || 'Error',
+                            period: 'Error', closingBalance: 'Error',
+                        });
+                    }
+                };
+                reader.onerror = (error) => {
+                    console.error('FileReader error:', error);
+                    resolve(null);
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        /**
+         * Asks user for password using a modal.
+         * @param {string} filename - The name of the file requiring a password.
+         * @returns {Promise<string|null>} A promise that resolves with the password or null if cancelled.
+         */
+        function getPasswordFromUser(filename, isIncorrect = false) {
+             return new Promise((resolve) => {
+                passwordPromptText.textContent = isIncorrect 
+                    ? `Incorrect password for "${filename}". Please try again:`
+                    : `The file "${filename}" requires a password:`;
+                
+                passwordModal.classList.remove('hidden');
+                passwordInput.focus();
+                passwordInput.value = '';
+
+                const submitListener = () => {
+                    cleanup();
+                    resolve(passwordInput.value);
+                };
+
+                const cancelListener = () => {
+                    cleanup();
+                    resolve(null);
+                };
+                
+                const cleanup = () => {
+                    passwordSubmitBtn.removeEventListener('click', submitListener);
+                    passwordCancelBtn.removeEventListener('click', cancelListener);
+                    passwordModal.classList.add('hidden');
+                };
+
+                passwordSubmitBtn.addEventListener('click', submitListener, { once: true });
+                passwordCancelBtn.addEventListener('click', cancelListener, { once: true });
+            });
+        }
+
+
+        /**
+         * Extracts all text from a PDF given its ArrayBuffer. Handles password protection.
+         */
+        async function extractTextFromPdf(arrayBuffer, filename) {
+            let pdf;
+            try {
+                pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            } catch (error) {
+                if (error.name === 'PasswordException') {
+                    const password = await getPasswordFromUser(filename);
+                    if (password === null) {
+                        throw new Error("Password entry cancelled.");
+                    }
+                    try {
+                         pdf = await pdfjsLib.getDocument({ data: arrayBuffer, password: password }).promise;
+                    } catch (e) {
+                         if (e.name === 'PasswordException') {
+                            throw new Error("Incorrect password provided.");
+                         }
+                         throw e;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+            }
+            return fullText;
+        }
+
+        /**
+         * Identifies the bank name from the text of the statement.
+         */
+        function identifyBank(text) {
+            if (text.match(/KOTAK MAHINDRA BANK/i)) return 'Kotak Mahindra Bank';
+            if (text.match(/UNION BANK OF INDIA/i)) return 'Union Bank of India';
+            if (text.match(/SOUTH INDIAN BANK/i)) return 'South Indian Bank';
+            if (text.match(/STATE BANK OF INDIA/i)) return 'State Bank of India';
+            if (text.match(/HDFC BANK/i)) return 'HDFC Bank';
+            if (text.match(/ICICI Bank/i)) return 'ICICI Bank';
+            if (text.match(/CANARA BANK/i)) return 'Canara Bank';
+            if (text.match(/AXIS BANK/i)) return 'Axis Bank';
+            return 'Unknown';
+        }
+
+        /**
+         * Extracts key information from the raw text of a bank statement.
+         */
+        function extractInfoFromText(text) {
+            const notFound = 'N/A';
+            const singleLineText = text.replace(/\n/g, ' ');
+
+            // --- EXTRACTION LOGIC ---
+            const bankName = identifyBank(text);
+
+            // --- DYNAMIC PERIOD EXTRACTION ---
+            let period = notFound;
+            const datePattern = `(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[-\\/.,]\\d{1,2}[-\\/.,]\\d{2,4}|\\d{1,2}\\s\\w{3}\\s\\d{2,4})`;
+            const periodRegexes = [
+                new RegExp(`for the period\\s+(${datePattern})\\s+To\\s+(${datePattern})`, 'i'),
+                new RegExp(`FOR THE PERIOD FROM\\s+(${datePattern})\\s+TO\\s+(${datePattern})`, 'i'),
+                new RegExp(`Account Statement from\\s+(${datePattern})\\s+to\\s+(${datePattern})`, 'i'),
+                new RegExp(`Period\\s*:\\s*(${datePattern})\\s*To\\s*(${datePattern})`, 'i'),
+                new RegExp(`STATEMENT PERIOD\\s*:\\s*(${datePattern})\\s*TO\\s*(${datePattern})`, 'i'),
+                new RegExp(`From Date\\s*:\\s*(${datePattern})\\s*To Date\\s*:\\s*(${datePattern})`, 'i'),
+                new RegExp(`Statement Period From\\s*[-:]*\\s*(${datePattern})\\s*To\\s*(${datePattern})`, 'i'),
+                new RegExp(`(?:Period|From)[\\s:.-]*(${datePattern})\\s*(?:To|-)[\\s:.-]*(${datePattern})`, 'i')
+            ];
+
+            for (const regex of periodRegexes) {
+                const match = singleLineText.match(regex);
+                if (match) {
+                    const fromDate = match[1].replace(/,/g, '/');
+                    const toDate = match[2].replace(/,/g, '/');
+                    period = `${fromDate} - ${toDate}`;
+                    break;
+                }
+            }
+            
+            // --- ACCOUNT NUMBER EXTRACTION ---
+            let accountNumber = notFound;
+            const accountLabels = ['Account Number', 'A/c No', 'Account #', 'Account No', 'A/C No'];
+            const valueRegex = /(\b[X\d]{8,20}\b)/i;
+            for (const label of accountLabels) {
+                const labelRegex = new RegExp(label, "i");
+                const labelMatch = singleLineText.match(labelRegex);
+                if (labelMatch) {
+                    const searchText = singleLineText.substring(labelMatch.index + labelMatch[0].length);
+                    const valueMatch = searchText.substring(0, 100).match(valueRegex);
+                    if (valueMatch) {
+                        accountNumber = valueMatch[0];
+                        break;
+                    }
+                }
+            }
+
+            // --- CLOSING BALANCE EXTRACTION ---
+            let closingBalance = notFound;
+            
+            // PRIORITY 1: Look for specific keywords in summary tables first.
+            const summaryBalanceRegex = /Summary of Account as on.*?Balance \(INR\).*?([\d,]+\.\d{2})\s*Cr/i;
+            const summaryMatch = singleLineText.match(summaryBalanceRegex);
+            if (summaryMatch && summaryMatch[1]) {
+                closingBalance = summaryMatch[1];
+            }
+
+            // PRIORITY 2: Look for a specific "Closing Balance" keyword, good for Canara Bank etc.
+            if (closingBalance === notFound) {
+                const closingBalanceRegex = /Closing Balance[\s:]*([-\s]*[₹€$£]?\s*[\d,]+\.\d{2})/i;
+                const closingBalanceMatch = singleLineText.match(closingBalanceRegex);
+                if (closingBalanceMatch && closingBalanceMatch[1] && closingBalanceMatch[1].trim() !== '0.00') {
+                    closingBalance = closingBalanceMatch[1].replace(/\s/g, '');
+                }
+            }
+
+            // PRIORITY 3 (FALLBACK): If no summary balance found, look at the last transaction line.
+            if (closingBalance === notFound) {
+                const lines = text.split('\n');
+                let lastTransaction = { balance: null };
+                const transactionDateRegex = /(\d{1,2}[-\/.,]\d{1,2}[-\/.,]\d{2,4}|\d{2}-\w{3}-\d{2,4})/i;
+                const balanceValuesRegex = /[\d,]+\.\d{2}/g;
+                for (const line of lines) {
+                    const dateMatch = line.match(transactionDateRegex);
+                    if (dateMatch) {
+                        const balanceMatches = line.match(balanceValuesRegex);
+                        if (balanceMatches && balanceMatches.length >= 2) {
+                            lastTransaction = { balance: balanceMatches[balanceMatches.length - 1] };
+                        }
+                    }
+                }
+                if (lastTransaction.balance) {
+                    closingBalance = lastTransaction.balance;
+                }
+            }
+            
+            return {
+                bankName,
+                accountNumber,
+                period,
+                closingBalance,
+            };
+        }
+
+        /**
+         * Adds a new row to the results table in the UI.
+         */
+        function addResultToTable(result) {
+            const row = document.createElement('tr');
+            row.classList.add('hover:bg-gray-50');
+            const sanitize = (str) => {
+                const temp = document.createElement('div');
+                temp.textContent = str;
+                return temp.innerHTML;
+            };
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <a href="#" class="text-indigo-600 hover:text-indigo-800 hover:underline preview-link" data-filename="${sanitize(result.filename)}">${sanitize(result.filename)}</a>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sanitize(result.bankName)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sanitize(result.accountNumber)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sanitize(result.period)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-semibold">${sanitize(result.closingBalance)}</td>
+            `;
+            resultsBody.appendChild(row);
+        }
+
+        // --- PDF PREVIEW LOGIC ---
+        function renderPage(pdfDoc, pageNum) {
+            currentPdfDoc = pdfDoc;
+            currentPageNum = pageNum;
+            pdfDoc.getPage(pageNum).then(function(page) {
+                const viewport = page.getViewport({ scale: 1.5 });
+                const context = pdfCanvas.getContext('2d');
+                pdfCanvas.height = viewport.height;
+                pdfCanvas.width = viewport.width;
+                page.render({ canvasContext: context, viewport: viewport });
+            });
+            pageNumSpan.textContent = pageNum;
+            firstPageBtn.disabled = (pageNum <= 1);
+            prevPageBtn.disabled = (pageNum <= 1);
+            nextPageBtn.disabled = (pageNum >= pdfDoc.numPages);
+            lastPageBtn.disabled = (pageNum >= pdfDoc.numPages);
+        }
+
+        async function showPdfPreview(file) {
+            modalTitle.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const typedarray = new Uint8Array(e.target.result);
+                try {
+                    let pdfDoc_ = null;
+                    try {
+                        pdfDoc_ = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                    } catch (error) {
+                        if (error.name === 'PasswordException') {
+                            const password = await getPasswordFromUser(file.name);
+                            if (password === null) {
+                                return; // User cancelled
+                            }
+                            try {
+                                pdfDoc_ = await pdfjsLib.getDocument({ data: typedarray, password: password }).promise;
+                            } catch (e) {
+                                if (e.name === 'PasswordException') {
+                                    console.error("Incorrect password provided for preview.");
+                                    return;
+                                }
+                                throw e;
+                            }
+                        } else {
+                            throw error;
+                        }
+                    }
+                    pdfModal.classList.remove('hidden');
+                    currentPdfDoc = pdfDoc_;
+                    pageCountSpan.textContent = currentPdfDoc.numPages;
+                    renderPage(currentPdfDoc, 1);
+                } catch(err) {
+                    console.error(`Error previewing PDF: ${err.message}`);
+                    pdfModal.classList.add('hidden');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        resultsBody.addEventListener('click', function(event) {
+            if (event.target.classList.contains('preview-link')) {
+                event.preventDefault();
+                const filename = event.target.dataset.filename;
+                const file = uploadedFilesMap.get(filename);
+                if (file) {
+                    showPdfPreview(file);
+                }
+            }
+        });
+
+        modalClose.addEventListener('click', function() {
+            pdfModal.classList.add('hidden');
+            currentPdfDoc = null;
+        });
+        
+        firstPageBtn.addEventListener('click', function() {
+            if (currentPdfDoc) renderPage(currentPdfDoc, 1);
+        });
+
+        prevPageBtn.addEventListener('click', function() {
+            if (currentPageNum <= 1) return;
+            renderPage(currentPdfDoc, --currentPageNum);
+        });
+
+        nextPageBtn.addEventListener('click', function() {
+            if (currentPageNum >= currentPdfDoc.numPages) return;
+            renderPage(currentPdfDoc, ++currentPageNum);
+        });
+
+        lastPageBtn.addEventListener('click', function() {
+            if (currentPdfDoc) renderPage(currentPdfDoc, currentPdfDoc.numPages);
+        });
+    </script>
+</body>
+</html>
