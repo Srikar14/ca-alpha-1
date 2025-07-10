@@ -387,40 +387,49 @@
 
             // --- CLOSING BALANCE EXTRACTION ---
             let closingBalance = notFound;
-            
+
             // PRIORITY 1: Look for specific keywords in summary tables first.
-            const summaryBalanceRegex = /Summary of Account as on.*?Balance \(INR\).*?([\d,]+\.\d{2})\s*Cr/i;
+            const summaryBalanceRegex = /Summary of Account as on.*?Balance \(INR\).*?([-\d,]+\.\d{2})\s*(Cr|Dr)?/i;
             const summaryMatch = singleLineText.match(summaryBalanceRegex);
             if (summaryMatch && summaryMatch[1]) {
-                closingBalance = summaryMatch[1];
+                closingBalance = summaryMatch[1] + (summaryMatch[2] ? ' ' + summaryMatch[2] : '');
             }
 
-            // PRIORITY 2: Look for a specific "Closing Balance" keyword, good for Canara Bank etc.
+            // PRIORITY 2: Look for a specific "Closing Balance" or similar keyword.
             if (closingBalance === notFound) {
-                const closingBalanceRegex = /Closing Balance[\s:]*([-\s]*[₹€$£]?\s*[\d,]+\.\d{2})/i;
-                const closingBalanceMatch = singleLineText.match(closingBalanceRegex);
-                if (closingBalanceMatch && closingBalanceMatch[1] && closingBalanceMatch[1].trim() !== '0.00') {
-                    closingBalance = closingBalanceMatch[1].replace(/\s/g, '');
-                }
-            }
-
-            // PRIORITY 3 (FALLBACK): If no summary balance found, look at the last transaction line.
-            if (closingBalance === notFound) {
-                const lines = text.split('\n');
-                let lastTransaction = { balance: null };
-                const transactionDateRegex = /(\d{1,2}[-\/.,]\d{1,2}[-\/.,]\d{2,4}|\d{2}-\w{3}-\d{2,4})/i;
-                const balanceValuesRegex = /[\d,]+\.\d{2}/g;
-                for (const line of lines) {
-                    const dateMatch = line.match(transactionDateRegex);
-                    if (dateMatch) {
-                        const balanceMatches = line.match(balanceValuesRegex);
-                        if (balanceMatches && balanceMatches.length >= 2) {
-                            lastTransaction = { balance: balanceMatches[balanceMatches.length - 1] };
-                        }
+                const closingBalanceRegexes = [
+                    /Closing Balance[\s:]*([-\s₹€$£]*[\d,]+\.\d{2})\s*(Cr|Dr)?/i,
+                    /Closing Balance as on.*?([-\s₹€$£]*[\d,]+\.\d{2})\s*(Cr|Dr)?/i,
+                    /Available Balance[\s:]*([-\s₹€$£]*[\d,]+\.\d{2})\s*(Cr|Dr)?/i,
+                    /Balance as on.*?([-\s₹€$£]*[\d,]+\.\d{2})\s*(Cr|Dr)?/i,
+                    /Final Balance[\s:]*([-\s₹€$£]*[\d,]+\.\d{2})\s*(Cr|Dr)?/i,
+                ];
+                for (const regex of closingBalanceRegexes) {
+                    const match = singleLineText.match(regex);
+                    if (match && match[1]) {
+                        closingBalance = match[1].replace(/\s/g, '') + (match[2] ? ' ' + match[2] : '');
+                        break;
                     }
                 }
-                if (lastTransaction.balance) {
-                    closingBalance = lastTransaction.balance;
+            }
+
+            // PRIORITY 3 (FALLBACK): If no summary balance found, look at the last transaction line or last balance-like number.
+            if (closingBalance === notFound) {
+                // Try to find the last occurrence of a balance-like number after a "Balance" keyword
+                const balanceKeywordRegex = /(Closing|Available|Final)?\s*Balance.*?([-\d,]+\.\d{2})\s*(Cr|Dr)?/gi;
+                let lastMatch;
+                let match;
+                while ((match = balanceKeywordRegex.exec(singleLineText)) !== null) {
+                    lastMatch = match;
+                }
+                if (lastMatch && lastMatch[2]) {
+                    closingBalance = lastMatch[2] + (lastMatch[3] ? ' ' + lastMatch[3] : '');
+                } else {
+                    // As a last resort, pick the last number in the document that looks like a balance
+                    const allBalances = singleLineText.match(/[-\d,]+\.\d{2}/g);
+                    if (allBalances && allBalances.length > 0) {
+                        closingBalance = allBalances[allBalances.length - 1];
+                    }
                 }
             }
             
@@ -545,7 +554,7 @@
 
         lastPageBtn.addEventListener('click', function() {
             if (currentPdfDoc) renderPage(currentPdfDoc, currentPdfDoc.numPages);
-        });
+        }); //this is a test
     </script>
 </body>
 </html>
